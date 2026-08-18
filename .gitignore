@@ -1,0 +1,33 @@
+.env
+# Secrets and Credentials (CRITICAL)
+.env
+cookies.txt
+youtube_cookies.txt
+*cookies.txt
+
+# Virtual Environments
+.venv/
+env/
+venv/
+
+# Editor Settings
+.vscode/
+
+# Python Cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Large Media Files
+*.webm
+*.mp4
+*.mkv
+*.avi
+
+# Generated Outputs and Uploads
+outputs/
+transcripts/
+uploads/
+video_summarization/transcripts/
+video_summarization/uploads/

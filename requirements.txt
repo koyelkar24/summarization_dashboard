@@ -1,0 +1,10 @@
+streamlit==1.38.0
+yt-dlp==2024.8.6
+faster-whisper==1.0.3
+ffmpeg-python==0.2.0
+requests==2.32.3
+openai==1.43.0
+reportlab==4.2.2
+python-dotenv==1.0.1
+pillow
+av
