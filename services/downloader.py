@@ -4,6 +4,7 @@ Handles pulling a YouTube video (and its metadata) down to disk with yt-dlp.
 import json
 import re
 import shutil
+import socket
 import tempfile
 import uuid
 from pathlib import Path
@@ -23,17 +24,12 @@ class TranscriptUnavailableError(DownloadError):
 
 
 def _ensure_ffmpeg_available():
-    """
-    yt-dlp needs both ffmpeg AND ffprobe to merge YouTube's separate video
-    and audio streams.
-    """
     if FFMPEG_LOCATION:
         return  
     if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
         raise DownloadError(
             "ffmpeg and/or ffprobe were not found on your system PATH. "
-            "yt-dlp needs both to download and extract media. "
-            "Locally: install ffmpeg from https://ffmpeg.org/download.html."
+            "yt-dlp needs both to download and extract media."
         )
 
 
@@ -106,83 +102,103 @@ def _parse_vtt_captions(vtt_text: str) -> list:
     return segments
 
 
+PREFERRED_CAPTION_LANGS = ["en", "en-US", "en-GB", "hi", "en-orig"]
+
+def _pick_caption_track(caption_map: dict, native_lang: str = None):
+    if not caption_map:
+        return None, None
+    if native_lang and native_lang in caption_map:
+        return native_lang, caption_map[native_lang]
+    for lang in PREFERRED_CAPTION_LANGS:
+        if lang in caption_map:
+            return lang, caption_map[lang]
+    lang = next(iter(caption_map))
+    return lang, caption_map[lang]
+
+def _pick_caption_format(tracks: list):
+    for fmt_name in ("json3", "vtt", "srv3", "srv1"):
+        for t in tracks:
+            if t.get("ext") == fmt_name:
+                return t
+    return tracks[0] if tracks else None
+
+
 def fetch_youtube_transcript(url: str, progress_cb=None) -> dict:
     """
-    Extracts captions cleanly using yt-dlp's subtitle downloader with skip_download=True.
-    No video or audio files are ever downloaded to disk.
+    Reads caption URLs from yt-dlp's info dict without touching the disk.
+    Every network call has an explicit timeout to prevent hanging.
     """
     job_id = uuid.uuid4().hex[:10]
-    output_dir = UPLOAD_FOLDER / job_id
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     ydl_opts = {
         "skip_download": True,
-        "writesubtitles": True,
-        "writeautomaticsub": True,
-        "subtitleslangs": ["en", "en-US", "hi"], # Supports English and Hindi auto-captions
-        "subtitlesformat": "json3/vtt/best",
-        "outtmpl": str(output_dir / "sub"),
         "quiet": True,
         "no_warnings": True,
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["android", "web"]
-            }
-        }
+        "socket_timeout": 15,
+        "retries": 3,
+        # Using mobile clients to bypass 403 Forbidden Cloud Datacenter Blocks
+        "extractor_args": {"youtube": {"player_client": ["ios", "android", "mweb"]}},
     }
-
     cookiefile = _cookiefile_path()
     if cookiefile:
         ydl_opts["cookiefile"] = cookiefile
 
     if progress_cb:
-        progress_cb(20, "Extracting caption data from YouTube…")
+        progress_cb(10, "Fetching video info…")
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-    except Exception as e:
-        shutil.rmtree(output_dir, ignore_errors=True)
-        raise DownloadError(f"Could not fetch YouTube captions: {str(e)}")
+            info = ydl.extract_info(url, download=False)
+    except yt_dlp.utils.DownloadError as e:
+        msg = str(e)
+        if "Sign in to confirm" in msg or "not a bot" in msg or "403" in msg:
+            msg += (
+                "\n\nYouTube blocked this request. When running on Streamlit Cloud, "
+                "you MUST provide YouTube cookies via Streamlit Secrets."
+            )
+        raise DownloadError(msg) from e
+    except (socket.timeout, TimeoutError) as e:
+        raise DownloadError("Timed out reaching YouTube. Try again.") from e
 
-    # Look for the downloaded subtitle file on disk
-    sub_files = list(output_dir.glob("sub.*"))
-    if not sub_files:
-        shutil.rmtree(output_dir, ignore_errors=True)
-        raise TranscriptUnavailableError(
-            "This video does not have readable captions. "
-            "Try using a different video URL."
-        )
+    if progress_cb:
+        progress_cb(40, "Looking for captions…")
 
-    # Parse the subtitle file found
-    sub_file = sub_files[0]
-    segments = []
-    used_auto = "auto" in sub_file.name
+    lang, tracks = _pick_caption_track(info.get("subtitles") or {}, info.get("language"))
+    used_auto = False
+    if not tracks:
+        lang, tracks = _pick_caption_track(info.get("automatic_captions") or {}, info.get("language"))
+        used_auto = True
 
-    if sub_file.suffix == ".json3" or "json3" in sub_file.name:
-        try:
-            data = json.loads(sub_file.read_text(encoding="utf-8"))
-            segments = _parse_json3_captions(data)
-        except Exception:
-            pass
-    
+    if not tracks:
+        raise TranscriptUnavailableError("This video has no captions. Try a different video.")
+
+    track = _pick_caption_format(tracks)
+    if not track or not track.get("url"):
+        raise TranscriptUnavailableError("Found a caption track but couldn't get a downloadable URL.")
+
+    if progress_cb:
+        progress_cb(70, f"Downloading captions ({lang})…")
+
+    try:
+        resp = requests.get(track["url"], timeout=15)
+        resp.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        raise DownloadError(f"Failed to download caption data: {e}") from e
+
+    if track.get("ext") == "json3":
+        segments = _parse_json3_captions(resp.json())
+    else:
+        segments = _parse_vtt_captions(resp.text)
+
     if not segments:
-        # Fallback to parsing VTT format
-        vtt_text = sub_file.read_text(encoding="utf-8", errors="ignore")
-        segments = _parse_vtt_captions(vtt_text)
-
-    # Clean up temp caption folder
-    shutil.rmtree(output_dir, ignore_errors=True)
-
-    if not segments:
-        raise TranscriptUnavailableError("Found caption file but couldn't parse text segments.")
+        raise TranscriptUnavailableError("Captions couldn't be parsed.")
 
     if progress_cb:
         progress_cb(100, "Captions ready")
 
     return {
         "job_id": job_id,
-        "file_path": None,  
+        "file_path": None,
         "title": info.get("title", "Untitled video"),
         "duration_seconds": info.get("duration", 0),
         "thumbnail": info.get("thumbnail"),
@@ -192,7 +208,7 @@ def fetch_youtube_transcript(url: str, progress_cb=None) -> dict:
         "source_url": url,
         "transcript_text": " ".join(s["text"] for s in segments),
         "segments": segments,
-        "caption_language": info.get("subtitles_langs", ["en"])[0] if info.get("subtitles_langs") else "auto",
+        "caption_language": lang,
         "caption_auto_generated": used_auto,
     }
 
@@ -215,7 +231,7 @@ def download_youtube_video(url: str, progress_cb=None) -> dict:
             progress_cb(100, "Download complete")
 
     ydl_opts = {
-        "format": "ba/best", # Best audio only
+        "format": "ba/best", 
         "outtmpl": out_template,
         "noplaylist": True,
         "quiet": True,
@@ -226,7 +242,7 @@ def download_youtube_video(url: str, progress_cb=None) -> dict:
         "source_address": "0.0.0.0",
         "extractor_args": {
             "youtube": {
-                "player_client": ["android", "ios", "web"] 
+                "player_client": ["ios", "android", "mweb"] # Using mobile clients for cloud 403 mitigation
             }
         }
     }
