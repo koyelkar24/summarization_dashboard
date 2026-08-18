@@ -1,8 +1,0 @@
-streamlit
-yt-dlp
-requests
-python-dotenv
-google-generativeai
-groq
-faster-whisper
-torch
