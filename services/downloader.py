@@ -1,6 +1,5 @@
 """
-Handles pulling YouTube metadata and transcripts using stealth APIs to bypass 
-Streamlit Cloud 403 Forbidden Datacenter Blocks.
+Handles pulling YouTube metadata and transcripts using stealth APIs.
 """
 import re
 import uuid
@@ -17,32 +16,33 @@ class TranscriptUnavailableError(DownloadError):
     pass
 
 def extract_video_id(url: str) -> str:
-    """Extracts the 11-character YouTube video ID."""
-    match = re.search(r"(?:v=|\/)([0-9A-Za-z_-]{11})(?:\?|&|/|$)", url)
+    """Extracts the video ID, even from shortened or Shorts URLs."""
+    if "youtu.be" in url:
+        return url.split("/")[-1].split("?")[0]
+    match = re.search(r"(?:v=)([0-9A-Za-z_-]{11})", url)
     if match:
         return match.group(1)
-    raise DownloadError("Could not extract YouTube video ID from the provided URL.")
+    match = re.search(r"(?:shorts\/)([0-9A-Za-z_-]{11})", url)
+    if match:
+        return match.group(1)
+    raise DownloadError("Could not extract YouTube video ID. Please check the URL.")
 
 def fetch_youtube_metadata(url: str) -> dict:
-    """Uses YouTube's official, public API to safely get title/thumbnail."""
     oembed_url = f"https://www.youtube.com/oembed?url={url}&format=json"
     try:
         resp = requests.get(oembed_url, timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
-        return {
-            "title": data.get("title", "Untitled Video"),
-            "channel": data.get("author_name", "Unknown Channel"),
-            "thumbnail": data.get("thumbnail_url", ""),
-        }
+        if resp.status_code == 200:
+            data = resp.json()
+            return {
+                "title": data.get("title", "Untitled Video"),
+                "channel": data.get("author_name", "Unknown Channel"),
+                "thumbnail": data.get("thumbnail_url", ""),
+            }
     except Exception:
-        return {"title": "YouTube Video", "channel": "YouTube", "thumbnail": ""}
+        pass
+    return {"title": "YouTube Video", "channel": "YouTube", "thumbnail": ""}
 
 def fetch_youtube_transcript(url: str, progress_cb=None) -> dict:
-    """
-    Uses youtube-transcript-api to pull captions directly. 
-    Bypasses yt-dlp entirely to avoid 403 Forbidden blocks!
-    """
     if progress_cb: progress_cb(20, "Connecting to YouTube via Stealth API...")
 
     job_id = uuid.uuid4().hex[:10]
@@ -52,20 +52,26 @@ def fetch_youtube_transcript(url: str, progress_cb=None) -> dict:
     if progress_cb: progress_cb(50, "Extracting transcript data...")
 
     try:
+        # 1. Fetch the list of ALL available transcripts
         transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-        try:
-            transcript = transcript_list.find_transcript(['en', 'en-US', 'hi'])
-        except Exception:
-            transcript = next(iter(transcript_list))
-            
+        
+        # 2. Grab the first available transcript (no matter what language it is)
+        transcript = next(iter(transcript_list))
+        
+        # 3. If it is NOT English, tell the API to translate it to English automatically!
+        if transcript.language_code not in ['en', 'en-US']:
+            try:
+                transcript = transcript.translate('en')
+            except:
+                pass # If translation fails, just use the original language
+                
         caption_data = transcript.fetch()
         is_generated = transcript.is_generated
         lang = transcript.language_code
         
     except Exception as e:
-        raise TranscriptUnavailableError(
-            "This video does not have English/Hindi captions available, or the creator disabled them."
-        )
+        # 🔥 THIS REVEALS THE TRUE ERROR FROM YOUTUBE 🔥
+        raise TranscriptUnavailableError(f"YouTube API Error: {type(e).__name__} - {str(e)}")
 
     segments = []
     full_text = []
@@ -79,7 +85,7 @@ def fetch_youtube_transcript(url: str, progress_cb=None) -> dict:
         full_text.append(text)
 
     if not segments:
-        raise TranscriptUnavailableError("Transcript was found but contained no text.")
+        raise TranscriptUnavailableError("Transcript found but it was completely empty.")
 
     if progress_cb: progress_cb(100, "Captions ready!")
 
@@ -101,8 +107,7 @@ def fetch_youtube_transcript(url: str, progress_cb=None) -> dict:
 
 def download_youtube_video(url: str, progress_cb=None) -> dict:
     raise DownloadError(
-        "Audio downloading is disabled in the cloud version due to YouTube firewalls (403 Forbidden). "
-        "Please paste a YouTube video that has 'CC' (Closed Captions) available!"
+        "Audio downloading is disabled in the cloud. Please paste a video with CC available!"
     )
 
 def register_uploaded_file(saved_path: Path) -> dict:
