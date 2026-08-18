@@ -1,0 +1,9 @@
+streamlit
+requests
+python-dotenv
+google-genai
+groq
+faster-whisper
+torch
+reportlab
+youtube-transcript-api
