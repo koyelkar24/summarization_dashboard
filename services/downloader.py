@@ -48,7 +48,8 @@ def fetch_youtube_transcript(url: str, progress_cb=None) -> dict:
         is_generated = transcript.is_generated
         lang = transcript.language_code
     except Exception as e:
-        raise TranscriptUnavailableError("This video does not have readable captions available on YouTube.")
+        # 🔥 THIS WILL PRINT THE EXACT HIDDEN ERROR REASON 🔥
+        raise TranscriptUnavailableError(f"🚨 HIDDEN ERROR REVEALED: {type(e).__name__} - {str(e)}")
 
     segments, full_text = [], []
     for item in caption_data:
@@ -72,8 +73,6 @@ def fetch_youtube_transcript(url: str, progress_cb=None) -> dict:
     }
 
 def download_youtube_video(url: str, progress_cb=None) -> dict:
-    # 🔥 THIS IS THE CRITICAL FIX 🔥 
-    # Instead of using yt-dlp to download the video, we stop the app and tell the user why.
     raise DownloadError(
         "Direct downloading is blocked by YouTube's cloud firewalls (403 Forbidden). "
         "Please paste a YouTube video that has 'CC' (Closed Captions) available!"
