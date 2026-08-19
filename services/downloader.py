@@ -1,25 +1,36 @@
 """
-Handles pulling YouTube metadata and transcripts using stealth APIs.
+Handles pulling YouTube metadata and transcripts.
+
+Strategy:
+- Captions: youtube_transcript_api (lighter, avoids most yt-dlp bot-detection
+  / 403 issues since it never downloads media, just reads the caption track).
+- Video download (Whisper fallback only, when a video has no captions):
+  yt-dlp, which still needs ffmpeg/ffprobe on PATH (or FFMPEG_LOCATION set).
 """
 import re
-<<<<<<< HEAD
 import shutil
 import socket
 import tempfile
-=======
->>>>>>> ab2b231420c056f9860ac72e0fde47f673af9d66
 import uuid
 from pathlib import Path
+
 import requests
+import yt_dlp
 from youtube_transcript_api import YouTubeTranscriptApi
 
-from config import UPLOAD_FOLDER
+from config import UPLOAD_FOLDER, FFMPEG_LOCATION, YOUTUBE_COOKIES_CONTENT, YOUTUBE_COOKIES_FILE
+
 
 class DownloadError(Exception):
     pass
 
+
 class TranscriptUnavailableError(DownloadError):
     pass
+
+
+PREFERRED_CAPTION_LANGS = ["en", "en-US", "en-GB", "hi", "en-orig"]
+
 
 def extract_video_id(url: str) -> str:
     """Extracts the video ID, even from shortened or Shorts URLs."""
@@ -33,14 +44,130 @@ def extract_video_id(url: str) -> str:
         return match.group(1)
     raise DownloadError("Could not extract YouTube video ID. Please check the URL.")
 
-<<<<<<< HEAD
+
+def fetch_youtube_metadata(url: str) -> dict:
+    """Lightweight title/channel/thumbnail lookup via YouTube's oEmbed endpoint."""
+    oembed_url = f"https://www.youtube.com/oembed?url={url}&format=json"
+    try:
+        resp = requests.get(oembed_url, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            return {
+                "title": data.get("title", "Untitled Video"),
+                "channel": data.get("author_name", "Unknown Channel"),
+                "thumbnail": data.get("thumbnail_url", ""),
+            }
+    except Exception:
+        pass
+    return {"title": "YouTube Video", "channel": "YouTube", "thumbnail": ""}
+
+
+def _get_field(item, key, default=None):
+    """
+    youtube_transcript_api >=0.6.2 returns FetchedTranscriptSnippet objects
+    (attribute access), older versions return plain dicts. Support both so
+    a library upgrade doesn't silently break caption parsing.
+    """
+    if isinstance(item, dict):
+        return item.get(key, default)
+    return getattr(item, key, default)
+
+
+# --- Caption fetching (no download, no ffmpeg, no Whisper) -----------------
+
+def fetch_youtube_transcript(url: str, progress_cb=None) -> dict:
+    if progress_cb:
+        progress_cb(20, "Connecting to YouTube via captions API…")
+
+    job_id = uuid.uuid4().hex[:10]
+    video_id = extract_video_id(url)
+    metadata = fetch_youtube_metadata(url)
+
+    if progress_cb:
+        progress_cb(50, "Extracting transcript data…")
+
+    try:
+        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+
+        # Prefer a manually-created (human-written) transcript in our
+        # preferred languages, then fall back to auto-generated, then to
+        # whatever's available at all.
+        transcript = None
+        for lang in PREFERRED_CAPTION_LANGS:
+            try:
+                transcript = transcript_list.find_manually_created_transcript([lang])
+                break
+            except Exception:
+                continue
+        if transcript is None:
+            for lang in PREFERRED_CAPTION_LANGS:
+                try:
+                    transcript = transcript_list.find_generated_transcript([lang])
+                    break
+                except Exception:
+                    continue
+        if transcript is None:
+            transcript = next(iter(transcript_list))
+
+        # Translate to English if the chosen track isn't already English.
+        if transcript.language_code not in ("en", "en-US", "en-GB"):
+            try:
+                transcript = transcript.translate("en")
+            except Exception:
+                pass  # No translation available — keep original language.
+
+        caption_data = transcript.fetch()
+        is_generated = transcript.is_generated
+        lang = transcript.language_code
+
+    except Exception as e:
+        raise TranscriptUnavailableError(f"YouTube API Error: {type(e).__name__} - {str(e)}")
+
+    segments = []
+    full_text = []
+    for item in caption_data:
+        text = (_get_field(item, "text", "") or "").replace("\n", " ").strip()
+        if not text:
+            continue
+        start = round(_get_field(item, "start", 0) or 0, 2)
+        duration = _get_field(item, "duration", 0) or 0
+        end = round(start + duration, 2)
+        segments.append({"start": start, "end": end, "text": text})
+        full_text.append(text)
+
+    if not segments:
+        raise TranscriptUnavailableError("Transcript found but it was completely empty.")
+
+    if progress_cb:
+        progress_cb(100, "Captions ready!")
+
+    return {
+        "job_id": job_id,
+        "file_path": None,
+        "title": metadata["title"],
+        "duration_seconds": segments[-1]["end"] if segments else 0,
+        "thumbnail": metadata["thumbnail"],
+        "channel": metadata["channel"],
+        "upload_date": "Unknown",
+        "source": "youtube",
+        "source_url": url,
+        "transcript_text": " ".join(full_text),
+        "segments": segments,
+        "caption_language": lang,
+        "caption_auto_generated": is_generated,
+    }
+
+
+# --- Video download (Whisper fallback only) ---------------------------------
+
 def _ensure_ffmpeg_available():
     if FFMPEG_LOCATION:
-        return  
+        return
     if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
         raise DownloadError(
             "ffmpeg and/or ffprobe were not found on your system PATH. "
-            "yt-dlp needs both to download and extract media."
+            "yt-dlp needs both to download and extract media. "
+            "Locally: install ffmpeg from https://ffmpeg.org/download.html."
         )
 
 
@@ -65,239 +192,11 @@ def _cookiefile_path():
     return None
 
 
-# --- Caption-based path (no download, no ffmpeg, no Whisper) -----------------
-
-def _parse_json3_captions(data: dict) -> list:
-    segments = []
-    for event in data.get("events", []):
-        if "segs" not in event:
-            continue
-        text = "".join(seg.get("utf8", "") for seg in event["segs"])
-        text = " ".join(text.replace("\n", " ").split())
-        if not text:
-            continue
-        start = event.get("tStartMs", 0) / 1000
-        dur = event.get("dDurationMs", 0) / 1000
-        segments.append({"start": round(start, 2), "end": round(start + dur, 2), "text": text})
-    return segments
-
-
-_VTT_CUE_RE = re.compile(
-    r"(\d{2}:\d{2}:\d{2}\.\d{3}) --> (\d{2}:\d{2}:\d{2}\.\d{3}).*?\n(.*?)(?=\n\n|\Z)",
-    re.DOTALL,
-)
-
-
-def _vtt_timestamp_to_seconds(ts: str) -> float:
-    h, m, s = ts.split(":")
-    return int(h) * 3600 + int(m) * 60 + float(s)
-
-
-def _parse_vtt_captions(vtt_text: str) -> list:
-    segments = []
-    prev_text = ""
-    for match in _VTT_CUE_RE.finditer(vtt_text):
-        start, end, raw_text = match.groups()
-        text = re.sub(r"<[^>]+>", "", raw_text)
-        text = " ".join(text.split())
-        if not text or text == prev_text or (prev_text and (prev_text in text or text in prev_text)):
-            if len(text) > len(prev_text):
-                prev_text = text
-            continue
-        segments.append({
-            "start": round(_vtt_timestamp_to_seconds(start), 2),
-            "end": round(_vtt_timestamp_to_seconds(end), 2),
-            "text": text,
-        })
-        prev_text = text
-    return segments
-
-=======
-def fetch_youtube_metadata(url: str) -> dict:
-    oembed_url = f"https://www.youtube.com/oembed?url={url}&format=json"
-    try:
-        resp = requests.get(oembed_url, timeout=10)
-        if resp.status_code == 200:
-            data = resp.json()
-            return {
-                "title": data.get("title", "Untitled Video"),
-                "channel": data.get("author_name", "Unknown Channel"),
-                "thumbnail": data.get("thumbnail_url", ""),
-            }
-    except Exception:
-        pass
-    return {"title": "YouTube Video", "channel": "YouTube", "thumbnail": ""}
->>>>>>> ab2b231420c056f9860ac72e0fde47f673af9d66
-
-PREFERRED_CAPTION_LANGS = ["en", "en-US", "en-GB", "hi", "en-orig"]
-
-def _pick_caption_track(caption_map: dict, native_lang: str = None):
-    if not caption_map:
-        return None, None
-    if native_lang and native_lang in caption_map:
-        return native_lang, caption_map[native_lang]
-    for lang in PREFERRED_CAPTION_LANGS:
-        if lang in caption_map:
-            return lang, caption_map[lang]
-    lang = next(iter(caption_map))
-    return lang, caption_map[lang]
-
-def _pick_caption_format(tracks: list):
-    for fmt_name in ("json3", "vtt", "srv3", "srv1"):
-        for t in tracks:
-            if t.get("ext") == fmt_name:
-                return t
-    return tracks[0] if tracks else None
-
-
-def fetch_youtube_transcript(url: str, progress_cb=None) -> dict:
-<<<<<<< HEAD
-    """
-    Reads caption URLs from yt-dlp's info dict without touching the disk.
-    Every network call has an explicit timeout to prevent hanging.
-    """
-    job_id = uuid.uuid4().hex[:10]
-
-    ydl_opts = {
-        "skip_download": True,
-        "quiet": True,
-        "no_warnings": True,
-        "socket_timeout": 15,
-        "retries": 3,
-        # Using mobile clients to bypass 403 Forbidden Cloud Datacenter Blocks
-        "extractor_args": {"youtube": {"player_client": ["ios", "android", "mweb"]}},
-    }
-    cookiefile = _cookiefile_path()
-    if cookiefile:
-        ydl_opts["cookiefile"] = cookiefile
-
-    if progress_cb:
-        progress_cb(10, "Fetching video info…")
-
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-    except yt_dlp.utils.DownloadError as e:
-        msg = str(e)
-        if "Sign in to confirm" in msg or "not a bot" in msg or "403" in msg:
-            msg += (
-                "\n\nYouTube blocked this request. When running on Streamlit Cloud, "
-                "you MUST provide YouTube cookies via Streamlit Secrets."
-            )
-        raise DownloadError(msg) from e
-    except (socket.timeout, TimeoutError) as e:
-        raise DownloadError("Timed out reaching YouTube. Try again.") from e
-
-    if progress_cb:
-        progress_cb(40, "Looking for captions…")
-
-    lang, tracks = _pick_caption_track(info.get("subtitles") or {}, info.get("language"))
-    used_auto = False
-    if not tracks:
-        lang, tracks = _pick_caption_track(info.get("automatic_captions") or {}, info.get("language"))
-        used_auto = True
-
-    if not tracks:
-        raise TranscriptUnavailableError("This video has no captions. Try a different video.")
-
-    track = _pick_caption_format(tracks)
-    if not track or not track.get("url"):
-        raise TranscriptUnavailableError("Found a caption track but couldn't get a downloadable URL.")
-
-    if progress_cb:
-        progress_cb(70, f"Downloading captions ({lang})…")
-
-    try:
-        resp = requests.get(track["url"], timeout=15)
-        resp.raise_for_status()
-    except requests.exceptions.RequestException as e:
-        raise DownloadError(f"Failed to download caption data: {e}") from e
-
-    if track.get("ext") == "json3":
-        segments = _parse_json3_captions(resp.json())
-    else:
-        segments = _parse_vtt_captions(resp.text)
-
-    if not segments:
-        raise TranscriptUnavailableError("Captions couldn't be parsed.")
-=======
-    if progress_cb: progress_cb(20, "Connecting to YouTube via Stealth API...")
-
-    job_id = uuid.uuid4().hex[:10]
-    video_id = extract_video_id(url)
-    metadata = fetch_youtube_metadata(url)
-
-    if progress_cb: progress_cb(50, "Extracting transcript data...")
-
-    try:
-        # 1. Fetch the list of ALL available transcripts
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-        
-        # 2. Grab the first available transcript (no matter what language it is)
-        transcript = next(iter(transcript_list))
-        
-        # 3. If it is NOT English, tell the API to translate it to English automatically!
-        if transcript.language_code not in ['en', 'en-US']:
-            try:
-                transcript = transcript.translate('en')
-            except:
-                pass # If translation fails, just use the original language
-                
-        caption_data = transcript.fetch()
-        is_generated = transcript.is_generated
-        lang = transcript.language_code
-        
-    except Exception as e:
-        # 🔥 THIS REVEALS THE TRUE ERROR FROM YOUTUBE 🔥
-        raise TranscriptUnavailableError(f"YouTube API Error: {type(e).__name__} - {str(e)}")
-
-    segments = []
-    full_text = []
-    
-    for item in caption_data:
-        text = item.get("text", "").replace("\n", " ").strip()
-        if not text: continue
-        start = round(item.get("start", 0), 2)
-        end = round(start + item.get("duration", 0), 2)
-        segments.append({"start": start, "end": end, "text": text})
-        full_text.append(text)
-
-    if not segments:
-        raise TranscriptUnavailableError("Transcript found but it was completely empty.")
->>>>>>> ab2b231420c056f9860ac72e0fde47f673af9d66
-
-    if progress_cb: progress_cb(100, "Captions ready!")
-
-    return {
-        "job_id": job_id,
-        "file_path": None,
-<<<<<<< HEAD
-        "title": info.get("title", "Untitled video"),
-        "duration_seconds": info.get("duration", 0),
-        "thumbnail": info.get("thumbnail"),
-        "channel": info.get("uploader", "Unknown"),
-        "upload_date": info.get("upload_date"),
-=======
-        "title": metadata["title"],
-        "duration_seconds": segments[-1]["end"] if segments else 0,
-        "thumbnail": metadata["thumbnail"],
-        "channel": metadata["channel"],
-        "upload_date": "Unknown",
->>>>>>> ab2b231420c056f9860ac72e0fde47f673af9d66
-        "source": "youtube",
-        "source_url": url,
-        "transcript_text": " ".join(full_text),
-        "segments": segments,
-        "caption_language": lang,
-<<<<<<< HEAD
-        "caption_auto_generated": used_auto,
-=======
-        "caption_auto_generated": is_generated,
->>>>>>> ab2b231420c056f9860ac72e0fde47f673af9d66
-    }
-
 def download_youtube_video(url: str, progress_cb=None) -> dict:
-<<<<<<< HEAD
+    """
+    Used only when a video has no usable captions — downloads audio so
+    Whisper can transcribe it locally. Requires ffmpeg/ffprobe.
+    """
     _ensure_ffmpeg_available()
 
     job_id = uuid.uuid4().hex[:10]
@@ -315,7 +214,7 @@ def download_youtube_video(url: str, progress_cb=None) -> dict:
             progress_cb(100, "Download complete")
 
     ydl_opts = {
-        "format": "ba/best", 
+        "format": "ba/best",  # Best audio only
         "outtmpl": out_template,
         "noplaylist": True,
         "quiet": True,
@@ -326,11 +225,11 @@ def download_youtube_video(url: str, progress_cb=None) -> dict:
         "source_address": "0.0.0.0",
         "extractor_args": {
             "youtube": {
-                "player_client": ["ios", "android", "mweb"] # Using mobile clients for cloud 403 mitigation
+                "player_client": ["ios", "android", "mweb"]  # mitigates 403s
             }
-        }
+        },
     }
-    
+
     if FFMPEG_LOCATION:
         ydl_opts["ffmpeg_location"] = FFMPEG_LOCATION
 
@@ -342,7 +241,7 @@ def download_youtube_video(url: str, progress_cb=None) -> dict:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             final_path = Path(ydl.prepare_filename(info))
-            
+
     except yt_dlp.utils.DownloadError as e:
         msg = str(e)
         if "403" in msg or "Forbidden" in msg:
@@ -353,6 +252,8 @@ def download_youtube_video(url: str, progress_cb=None) -> dict:
         raise DownloadError(msg) from e
     except AttributeError as e:
         raise DownloadError(f"Internal yt-dlp/ffmpeg error: {e}") from e
+    except (socket.timeout, TimeoutError) as e:
+        raise DownloadError("Timed out reaching YouTube. Try again.") from e
 
     return {
         "job_id": job_id,
@@ -366,11 +267,6 @@ def download_youtube_video(url: str, progress_cb=None) -> dict:
         "source_url": url,
     }
 
-=======
-    raise DownloadError(
-        "Audio downloading is disabled in the cloud. Please paste a video with CC available!"
-    )
->>>>>>> ab2b231420c056f9860ac72e0fde47f673af9d66
 
 def register_uploaded_file(saved_path: Path) -> dict:
     job_id = uuid.uuid4().hex[:10]
