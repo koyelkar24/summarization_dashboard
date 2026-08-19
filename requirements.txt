@@ -1,4 +1,5 @@
 streamlit
+yt-dlp
 requests
 python-dotenv
 google-genai
