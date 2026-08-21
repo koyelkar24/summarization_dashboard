@@ -296,38 +296,45 @@ def run_pipeline(input_kind: str, summary_mode: str, backend: str,
                         f"({caption_kind} captions, {video_meta.get('caption_language', 'en')})"
                     )
 
-                except Exception as e:
-                    # ATTEMPT 2: If YouTube blocks us (429) or no transcript exists, fallback to Whisper
-                    error_msg = str(e).lower()
-                    if "429" in error_msg or "too many requests" in error_msg or "transcript" in error_msg:
-                        status.update(label="⚠️ YouTube API blocked or missing captions. Falling back to Whisper...")
-                        
-                        # Download the video
-                        video_meta = downloader.download_youtube_video(youtube_url, progress_cb=progress_cb)
-                        job_id = video_meta["job_id"]
-                        status.write(f"✅ Downloaded: **{video_meta['title']}**")
+                except downloader.TranscriptUnavailableError as e:
+                    # This exception type IS the "no usable captions" signal —
+                    # always fall back to downloading + Whisper for it,
+                    # regardless of the specific underlying reason (rate
+                    # limit, IP block, captions genuinely disabled, etc).
+                    # Using the exception TYPE instead of string-matching
+                    # the message means this can never silently stop
+                    # triggering just because the wording changes.
+                    status.update(label=f"⚠️ {e} Falling back to Whisper…")
 
-                        duration = video_meta.get("duration_seconds")
-                        if not duration:
-                            duration = audio_extractor.get_duration_seconds(video_meta["file_path"])
-                            video_meta["duration_seconds"] = duration
+                    video_meta = downloader.download_youtube_video(youtube_url, progress_cb=progress_cb)
+                    job_id = video_meta["job_id"]
+                    status.write(f"✅ Downloaded: **{video_meta['title']}**")
 
-                        if duration and duration > MAX_VIDEO_DURATION_SECONDS:
-                            limit_min = MAX_VIDEO_DURATION_SECONDS // 60
-                            actual_min = int(duration // 60)
-                            status.update(
-                                label=f"❌ Video is {actual_min} min, over the {limit_min} min limit.",
-                                state="error",
-                            )
-                            return None
+                    duration = video_meta.get("duration_seconds")
+                    if not duration:
+                        duration = audio_extractor.get_duration_seconds(video_meta["file_path"])
+                        video_meta["duration_seconds"] = duration
 
-                        status.update(label="🎧 Extracting audio…")
-                        audio_path = audio_extractor.extract_audio(video_meta["file_path"], job_id, TRANSCRIPT_FOLDER)
+                    if duration and duration > MAX_VIDEO_DURATION_SECONDS:
+                        limit_min = MAX_VIDEO_DURATION_SECONDS // 60
+                        actual_min = int(duration // 60)
+                        status.update(
+                            label=f"❌ Video is {actual_min} min, over the {limit_min} min limit.",
+                            state="error",
+                        )
+                        return None
 
-                        status.update(label="📝 Transcribing audio locally with Whisper…")
-                        transcript = transcriber.transcribe_audio(audio_path)
-                    else:
-                        raise e # If it's a completely different error, raise it
+                    status.update(label="🎧 Extracting audio…")
+                    audio_path = audio_extractor.extract_audio(video_meta["file_path"], job_id, TRANSCRIPT_FOLDER)
+
+                    status.update(label="📝 Transcribing audio locally with Whisper…")
+                    transcript = transcriber.transcribe_audio(audio_path)
+                    # Note: any error raised inside THIS fallback (e.g. a
+                    # DownloadError from a still-403'd download) is NOT
+                    # caught here — it propagates to the outer except
+                    # below, which is correct: if both the transcript API
+                    # AND the download fallback fail, that's worth
+                    # surfacing, not silently swallowing.
 
             else:
                 # --- FILE UPLOAD LOGIC ---
