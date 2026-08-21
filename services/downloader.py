@@ -33,34 +33,61 @@ def fetch_youtube_metadata(url: str) -> dict:
     return {"title": "YouTube Video", "channel": "YouTube", "thumbnail": ""}
 
 def fetch_youtube_transcript(url: str, progress_cb=None) -> dict:
-    """Attempts to fetch CC directly to save time and RAM."""
+    """
+    Attempts to fetch CC directly to save time and RAM.
+
+    IMPORTANT: youtube-transcript-api v1.0+ changed its API from static
+    methods to instance methods (YouTubeTranscriptApi().list(...) instead
+    of YouTubeTranscriptApi.list_transcripts(...)), and fetch() now returns
+    FetchedTranscript (iterable of FetchedTranscriptSnippet objects with
+    .text/.start/.duration attributes) instead of a list of dicts. This is
+    written against v1.x — check `pip show youtube-transcript-api` if this
+    ever breaks again after an upgrade.
+    """
     if progress_cb: progress_cb(20, "Looking for Closed Captions...")
     job_id = uuid.uuid4().hex[:10]
     video_id = extract_video_id(url)
     metadata = fetch_youtube_metadata(url)
-    
+
     try:
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-        transcript = next(iter(transcript_list))
-        if transcript.language_code not in ['en', 'en-US', 'en-GB']:
-            try: transcript = transcript.translate('en')
-            except Exception: pass
-        caption_data = transcript.fetch()
+        ytt_api = YouTubeTranscriptApi()
+        transcript_list = ytt_api.list(video_id)
+
+        # Prefer an actual English track over grabbing whatever's first and
+        # maybe needing translation (translation stacks quality loss on
+        # top of speech-recognition errors for auto-generated captions).
+        try:
+            transcript = transcript_list.find_transcript(['en', 'en-US', 'en-GB'])
+        except Exception:
+            transcript = next(iter(transcript_list))
+            if transcript.is_translatable:
+                try:
+                    transcript = transcript.translate('en')
+                except Exception:
+                    pass  # proceed with the original-language transcript
+
+        fetched = transcript.fetch()  # FetchedTranscript: iterable of FetchedTranscriptSnippet
         is_generated = transcript.is_generated
         lang = transcript.language_code
-    except Exception:
-        raise TranscriptUnavailableError("No CC found. App will now fall back to audio download.")
+    except Exception as e:
+        # Preserve the REAL reason (rate limit, IP block, genuinely no
+        # captions, etc.) instead of a generic message that hides it —
+        # this is what the run_pipeline fallback logic reads and displays.
+        raise TranscriptUnavailableError(
+            f"Could not fetch captions via the transcript API "
+            f"({type(e).__name__}: {e}). Falling back to audio download."
+        ) from e
 
     segments, full_text = [], []
-    for item in caption_data:
-        text = item.get("text", "").replace("\n", " ").strip()
+    for snippet in fetched:
+        text = snippet.text.replace("\n", " ").strip()
         if not text: continue
-        start = round(item.get("start", 0), 2)
-        end = round(start + item.get("duration", 0), 2)
+        start = round(snippet.start, 2)
+        end = round(start + snippet.duration, 2)
         segments.append({"start": start, "end": end, "text": text})
         full_text.append(text)
 
-    if not segments: raise TranscriptUnavailableError("Transcript empty.")
+    if not segments: raise TranscriptUnavailableError("Transcript was empty after parsing.")
     if progress_cb: progress_cb(100, "Captions ready!")
 
     return {
