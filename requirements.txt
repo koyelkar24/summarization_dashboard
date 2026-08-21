@@ -8,3 +8,4 @@ faster-whisper
 torch
 reportlab
 youtube-transcript-api
+youtube-transcript-api==1.2.4
