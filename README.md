@@ -1,4 +1,4 @@
-# J.A.R.V.I.S. — AI Video Summarizer (Streamlit)
+ AI Video Summarizer (Streamlit)
 
 A single Streamlit app that takes a YouTube URL or an uploaded video file
 and produces an AI summary, key highlights, smart chapters, a
