@@ -9,6 +9,7 @@ questions / MCQs / flashcards) — with a switchable local (Ollama) or cloud
 No Flask, no HTML/CSS/JS files — the whole UI is Python, rendered by
 Streamlit.
 
+
 ## Pipeline
 
 ```
