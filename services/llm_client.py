@@ -1,11 +1,10 @@
 import json
 import requests
-import os
 from google import genai
 from google.genai import types
 
 from config import (
-    OLLAMA_HOST, OLLAMA_MODEL,
+    AI_BACKEND, OLLAMA_HOST, OLLAMA_MODEL,
     GEMINI_API_KEY, GEMINI_MODEL
 )
 
@@ -18,13 +17,13 @@ if GEMINI_API_KEY:
         gemini_client = None
 
 
-def chat_completion(system_prompt: str, user_prompt: str, backend: str = "gemini", json_mode: bool = False) -> str:
+def chat_completion(system_prompt: str, user_prompt: str, backend: str = None, json_mode: bool = False) -> str:
     """
     Routes requests to either Gemini (Cloud) or Ollama (Local).
     """
     
-    # We map any "cloud" backend string directly to Gemini
-    if backend in ("gemini", "openai", "groq"):  
+    backend = (backend or AI_BACKEND).strip().lower()
+    if backend == "gemini":
         if not GEMINI_API_KEY or not gemini_client:
             raise ValueError("GEMINI_API_KEY is missing or invalid in your secrets.toml or .env file.")
 
@@ -60,10 +59,11 @@ def chat_completion(system_prompt: str, user_prompt: str, backend: str = "gemini
             contents=prompt,
             config=config
         )
+        if not response.text:
+            raise RuntimeError("Gemini returned an empty response.")
         return response.text
 
-    else:
-        # Local Ollama
+    if backend == "ollama":
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
@@ -77,9 +77,11 @@ def chat_completion(system_prompt: str, user_prompt: str, backend: str = "gemini
             payload["format"] = "json"
 
         # Increased timeout to 5 minutes (300 seconds) for local processing
-        response = requests.post(f"{OLLAMA_HOST}/api/chat", json=payload, timeout=300)
+        response = requests.post(f"{OLLAMA_HOST.rstrip('/')}/api/chat", json=payload, timeout=300)
         response.raise_for_status()
         return response.json()["message"]["content"]
+
+    raise ValueError(f"Unsupported AI backend: {backend!r}. Choose 'gemini' or 'ollama'.")
 
 
 def safe_json_parse(text: str, default=None):

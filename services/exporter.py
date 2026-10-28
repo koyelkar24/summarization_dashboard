@@ -2,6 +2,7 @@
 Exports the AI summary (or study notes) as a downloadable PDF or TXT file.
 """
 from pathlib import Path
+from xml.sax.saxutils import escape
 
 from reportlab.lib.pagesizes import LETTER
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -37,9 +38,9 @@ def export_pdf(job_id: str, title: str, content: str) -> str:
         leading=16, spaceAfter=10,
     )
 
-    story = [Paragraph(title, title_style), Spacer(1, 6)]
+    story = [Paragraph(escape(title), title_style), Spacer(1, 6)]
     for para in content.split("\n\n"):
-        cleaned = para.strip().replace("\n", "<br/>")
+        cleaned = escape(para.strip()).replace("\n", "<br/>")
         if cleaned:
             story.append(Paragraph(cleaned, body_style))
 

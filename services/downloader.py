@@ -5,6 +5,7 @@ import re
 import tempfile
 import uuid
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 import requests
 import yt_dlp
 from youtube_transcript_api import YouTubeTranscriptApi
@@ -15,11 +16,22 @@ class DownloadError(Exception): pass
 class TranscriptUnavailableError(DownloadError): pass
 
 def extract_video_id(url: str) -> str:
-    if "youtu.be" in url: return url.split("/")[-1].split("?")[0]
-    match = re.search(r"(?:v=)([0-9A-Za-z_-]{11})", url)
-    if match: return match.group(1)
-    match = re.search(r"(?:shorts\/)([0-9A-Za-z_-]{11})", url)
-    if match: return match.group(1)
+    parsed = urlparse(url.strip())
+    host = (parsed.hostname or "").lower().removeprefix("www.")
+    if parsed.scheme not in {"http", "https"} or host not in {
+        "youtube.com", "m.youtube.com", "youtube-nocookie.com", "youtu.be"
+    }:
+        raise DownloadError("Enter a valid YouTube video URL.")
+
+    if host == "youtu.be":
+        candidate = parsed.path.strip("/").split("/")[0]
+    else:
+        candidate = parse_qs(parsed.query).get("v", [""])[0]
+        if not candidate:
+            match = re.match(r"^/(?:shorts|embed|live)/([\w-]{11})(?:/|$)", parsed.path)
+            candidate = match.group(1) if match else ""
+    if re.fullmatch(r"[0-9A-Za-z_-]{11}", candidate):
+        return candidate
     raise DownloadError("Could not extract YouTube video ID.")
 
 def fetch_youtube_metadata(url: str) -> dict:
@@ -100,11 +112,19 @@ def fetch_youtube_transcript(url: str, progress_cb=None) -> dict:
     }
 
 def _cookiefile_path():
-    """Generates a temporary cookie file from Streamlit Secrets."""
+    """Returns a cookie file path configured through secrets or the environment."""
     if YOUTUBE_COOKIES_CONTENT:
-        path = Path(tempfile.gettempdir()) / "jarvis_yt_cookies.txt"
-        path.write_text(YOUTUBE_COOKIES_CONTENT)
-        return str(path)
+        handle = tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", suffix="_jarvis_yt_cookies.txt", delete=False
+        )
+        with handle:
+            handle.write(YOUTUBE_COOKIES_CONTENT)
+        return handle.name
+    if YOUTUBE_COOKIES_FILE:
+        path = Path(YOUTUBE_COOKIES_FILE).expanduser()
+        if path.is_file():
+            return str(path)
+        raise DownloadError(f"YouTube cookies file not found: {path}")
     return None
 
 def download_youtube_video(url: str, progress_cb=None) -> dict:
@@ -142,7 +162,10 @@ def download_youtube_video(url: str, progress_cb=None) -> dict:
             info = ydl.extract_info(url, download=True)
             final_path = Path(ydl.prepare_filename(info))
     except Exception as e:
-        raise DownloadError(f"Download Failed (403). Make sure your YouTube Cookies are saved in Streamlit Secrets! Error: {e}") from e
+        raise DownloadError(f"YouTube download failed: {e}") from e
+    finally:
+        if cookie_path and YOUTUBE_COOKIES_CONTENT:
+            Path(cookie_path).unlink(missing_ok=True)
 
     return {
         "job_id": job_id, "file_path": str(final_path), "title": info.get("title", "Untitled video"),

@@ -20,16 +20,16 @@ for folder in (UPLOAD_FOLDER, OUTPUT_FOLDER, TRANSCRIPT_FOLDER):
 
 # --- AI backend switch ---------------------------------------------------
 # "ollama" -> free/local, needs `ollama serve` running
-# "openai" -> needs OPENAI_API_KEY
+# "gemini" -> needs GEMINI_API_KEY
 AI_BACKEND = os.getenv("AI_BACKEND", "ollama")
 
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1")
 
 
-# --- MISSING GEMINI CONFIG ADDED HERE ---
+# --- Gemini cloud backend --------------------------------------------------
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
 
 # --- ffmpeg / ffprobe location -------------------------------------------
 # Leave blank if ffmpeg/ffprobe are already on your system PATH. Otherwise
@@ -43,7 +43,7 @@ WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cpu")
 WHISPER_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
 
 # --- Upload limits ---------------------------------------------------------
-MAX_CONTENT_LENGTH = 500 * 1024 * 1024  # 500 MB
+MAX_CONTENT_LENGTH = 500 * 1024 * 1024  # 500 MiB
 ALLOWED_VIDEO_EXTENSIONS = {"mp4", "mov", "webm", "mkv", "avi"}
 
 # --- Summary modes ----------------------------------------------------------
@@ -55,7 +55,6 @@ SUMMARY_MODES = {
 
 DEFAULT_SUMMARY_MODE = "medium"
 DEPLOYED_MODE = False  # set to True when deploying to Streamlit Community Cloud
-MAX_VIDEO_DURATION_SECONDS = 25000  # Increased limit to allow 5+ hour videosYOUTUBE_COOKIES_CONTENT = None  # paste exported cookies.txt content here as a string if YouTube blocks you (429s)
-YOUTUBE_COOKIES_FILE = None     # or point this to a cookies.txt file path instead
-YOUTUBE_COOKIES_CONTENT = None  
-YOUTUBE_COOKIES_FILE = None
+MAX_VIDEO_DURATION_SECONDS = 25_000
+YOUTUBE_COOKIES_CONTENT = os.getenv("YOUTUBE_COOKIES_CONTENT")
+YOUTUBE_COOKIES_FILE = os.getenv("YOUTUBE_COOKIES_FILE")

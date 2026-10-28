@@ -24,228 +24,76 @@ if Path(".streamlit/secrets.toml").exists():
 from config import (
     UPLOAD_FOLDER, TRANSCRIPT_FOLDER, ALLOWED_VIDEO_EXTENSIONS,
     SUMMARY_MODES, DEFAULT_SUMMARY_MODE, AI_BACKEND, DEPLOYED_MODE,
-    MAX_VIDEO_DURATION_SECONDS,
+    MAX_VIDEO_DURATION_SECONDS, MAX_CONTENT_LENGTH,
 )
 from services import downloader, audio_extractor, transcriber, summarizer
 from services import chat_service, study_service, exporter
 
 
 # =============================================================================
-# Theme — Futuristic Animated Blue
+# Theme — J.A.R.V.I.S. professional dashboard
 # =============================================================================
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Rajdhani:wght@500;600;700&display=swap');
-
-html, body, [class*="css"] { 
-    font-family: 'Rajdhani', sans-serif; 
+:root {
+    --canvas: #0b1220;
+    --surface: #111b2b;
+    --border: #26364c;
+    --text: #e8eef7;
+    --muted: #98a9bf;
+    --accent: #55a6ff;
+    --accent-strong: #2f80ed;
 }
-
-/* Scoped text color — main content area only, not widget internals */
-.stMarkdown p, .stMarkdown li, .stMarkdown, .stCaption, .stText {
-    color: #cbe4ff !important; 
-    font-size: 1.1rem;
+html, body, [class*="css"] {
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
-h1, h2, h3, h4, h5, h6 {
-    color: #f0f9ff !important;
-    font-weight: 700 !important;
-}
-
-/* --- Drifting animated background glow --- */
-.stApp {
-    background-color: #030712;
-    background-image:
-        radial-gradient(circle at 20% 20%, rgba(56,189,248,0.16), transparent 40%),
-        radial-gradient(circle at 80% 80%, rgba(37,99,235,0.14), transparent 40%),
-        radial-gradient(circle at 50% 50%, rgba(6,182,212,0.08), transparent 50%);
-    background-size: 200% 200%;
-    animation: bgDrift 18s ease-in-out infinite;
-}
-@keyframes bgDrift {
-    0%   { background-position: 0% 0%, 100% 100%, 50% 50%; }
-    50%  { background-position: 100% 50%, 0% 50%, 30% 70%; }
-    100% { background-position: 0% 0%, 100% 100%, 50% 50%; }
-}
-
-section[data-testid="stSidebar"] { 
-    background-color: #020617 !important; 
-    border-right: 1px solid #1e3a5f !important; 
-}
+.stApp { background: var(--canvas); color: var(--text); }
+[data-testid="stAppViewContainer"] main .block-container { max-width: 1440px; padding: 2.25rem 3rem 4rem; }
+[data-testid="stHeader"] { background: transparent; }
+section[data-testid="stSidebar"] { background: #0e1725; border-right: 1px solid var(--border); }
+section[data-testid="stSidebar"] > div { padding-top: 1.5rem; }
 section[data-testid="stSidebar"] label,
-section[data-testid="stSidebar"] .stMarkdown p {
-    color: #93b8dd !important;
+section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p { color: var(--muted); }
+.sidebar-brand { display: flex; align-items: center; gap: .75rem; padding: .25rem 0 1rem; }
+.brand-mark { display: grid; place-items: center; width: 2.5rem; height: 2.5rem; border-radius: .75rem; background: #173458; color: #8cc8ff; font-size: 1.25rem; font-weight: 750; }
+.sidebar-brand strong { display: block; color: var(--text); font-size: 1rem; letter-spacing: .04em; }
+.sidebar-brand small { display: block; color: var(--muted); font-size: .78rem; margin-top: .12rem; }
+.jarvis-hero { display: flex; align-items: center; justify-content: space-between; gap: 1.5rem; margin: 0 0 1.6rem; padding: 1.6rem 1.8rem; border: 1px solid var(--border); border-radius: 1rem; background: linear-gradient(115deg, #132238 0%, #101a2a 58%, #12243a 100%); }
+.hero-kicker { color: #7bbcff; font-size: .73rem; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; }
+.jarvis-title { margin: .35rem 0 .15rem; color: #f4f7fb; font-size: 2rem; font-weight: 720; letter-spacing: .035em; }
+.jarvis-sub { margin: 0; color: #afbed0; font-size: .98rem; }
+.hero-tag { flex: 0 0 auto; padding: .55rem .8rem; border: 1px solid #31547a; border-radius: 999px; background: #122944; color: #a7d3ff; font-size: .82rem; font-weight: 600; }
+h1, h2, h3, h4, h5, h6 { color: #f0f4fa !important; font-weight: 650 !important; letter-spacing: -.015em; }
+[data-testid="stMarkdownContainer"] p, [data-testid="stMarkdownContainer"] li { color: #c4cfdd; }
+[data-testid="stCaptionContainer"] p { color: var(--muted); font-size: .88rem; }
+[data-testid="stMetric"] { min-height: 6.1rem; padding: 1rem 1.1rem; border: 1px solid var(--border); border-radius: .85rem; background: var(--surface); box-shadow: 0 8px 22px rgba(0, 0, 0, .12); }
+[data-testid="stMetricLabel"] { color: var(--muted) !important; font-size: .82rem !important; }
+[data-testid="stMetricValue"] { color: #eff5fc !important; font-size: 1.55rem !important; font-weight: 650; }
+[data-testid="stTabs"] [role="tablist"] { gap: .55rem; border-bottom: 1px solid var(--border); }
+[data-testid="stTabs"] button[role="tab"] { color: var(--muted); border-radius: .65rem .65rem 0 0; font-weight: 600; }
+[data-testid="stTabs"] button[role="tab"][aria-selected="true"] { color: #8fc7ff; }
+[data-baseweb="tab-highlight"] { background: var(--accent) !important; height: 2px !important; }
+[data-testid="stTextInput"] input, [data-testid="stSelectbox"] [data-baseweb="select"] > div { min-height: 2.8rem; border-color: #34465e; border-radius: .65rem; background: #101a29; color: var(--text); }
+[data-testid="stTextInput"] input:focus, [data-testid="stTextInput"] input:focus-visible { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+[data-testid="stFileUploader"] section { border: 1px dashed #405670; border-radius: .8rem; background: #101a29; }
+[data-testid="stFileUploader"] section:hover { border-color: var(--accent); }
+.stButton > button { min-height: 2.55rem; border: 1px solid #34465e; border-radius: .65rem; background: #152236; color: #dce6f2; font-weight: 600; transition: background .15s ease, border-color .15s ease; }
+.stButton > button:hover { border-color: #5689bd; background: #1b2d45; color: #fff; }
+.stButton > button[kind="primary"] { border-color: var(--accent-strong); background: var(--accent-strong); color: #fff; }
+.stButton > button[kind="primary"]:hover { border-color: #4a98ff; background: #4a98ff; }
+.stButton > button:focus-visible { outline: 2px solid #91caff; outline-offset: 2px; }
+[data-testid="stExpander"], [data-testid="stChatMessage"] { border: 1px solid var(--border); border-radius: .8rem; background: var(--surface); }
+[data-testid="stExpander"] summary { color: var(--text); font-weight: 600; }
+[data-testid="stChatMessage"] p { color: #d3dce8; }
+[data-testid="stAlert"] { border-radius: .75rem; }
+[data-testid="stVideo"] { overflow: hidden; border: 1px solid var(--border); border-radius: .85rem; }
+hr { border-color: var(--border) !important; }
+@media (max-width: 800px) {
+    [data-testid="stAppViewContainer"] main .block-container { padding: 1.25rem 1rem 3rem; }
+    .jarvis-hero { align-items: flex-start; flex-direction: column; padding: 1.25rem; }
+    .jarvis-title { font-size: 1.7rem; }
 }
-
-/* --- Animated gradient title --- */
-.jarvis-title {
-    font-family: 'Orbitron', sans-serif;
-    font-weight: 900;
-    font-size: 2.5rem;
-    letter-spacing: 6px;
-    color: #f0f9ff;
-    margin-bottom: 0px;
-}
-.jarvis-title span {
-    background: linear-gradient(90deg, #38bdf8, #06b6d4, #2563eb, #38bdf8);
-    background-size: 300% 100%;
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
-    animation: gradientFlow 6s linear infinite;
-}
-@keyframes gradientFlow {
-    0%   { background-position: 0% 50%; }
-    100% { background-position: 300% 50%; }
-}
-.jarvis-sub { 
-    color: #6b8cb3 !important; 
-    font-size: 0.95rem !important; 
-    letter-spacing: 2px; 
-    margin-top: 0; 
-    margin-bottom: 1.5rem;
-}
-
-/* --- Metrics: glowing pulse border --- */
-div[data-testid="stMetric"] {
-    background: #0b1220;
-    border: 1px solid #1e3a5f;
-    border-radius: 10px;
-    padding: 15px 20px;
-    animation: metricPulse 3s ease-in-out infinite;
-}
-@keyframes metricPulse {
-    0%, 100% { border-color: #1e3a5f; box-shadow: 0 0 0 rgba(56,189,248,0); }
-    50%      { border-color: #38bdf8; box-shadow: 0 0 16px rgba(56,189,248,0.35); }
-}
-div[data-testid="stMetricLabel"] { color: #7dabd6 !important; font-size: 1rem !important;}
-div[data-testid="stMetricValue"] { 
-    color: #38bdf8 !important; 
-    font-family: 'Orbitron', sans-serif; 
-    text-shadow: 0 0 10px rgba(56,189,248,0.5);
-}
-
-/* --- Status badges: pulsing online dot --- */
-.status-badge {
-    display: inline-block;
-    font-family: monospace;
-    font-size: 0.85rem;
-    color: #93b8dd;
-    background: #0b1220;
-    border: 1px solid #1e3a5f;
-    padding: 6px 14px;
-    border-radius: 20px;
-    margin-right: 10px;
-    margin-bottom: 20px;
-}
-.status-badge b { color: #38bdf8; text-shadow: 0 0 6px rgba(56,189,248,0.6); }
-.dot-online { 
-    color: #38bdf8; 
-    animation: dotPulse 1.8s ease-in-out infinite;
-}
-@keyframes dotPulse {
-    0%, 100% { opacity: 1;   text-shadow: 0 0 6px rgba(56,189,248,0.8); }
-    50%      { opacity: 0.4; text-shadow: 0 0 16px rgba(56,189,248,1); }
-}
-
-/* --- Buttons --- */
-div.stButton > button[kind="primary"] {
-    background: linear-gradient(90deg, #2563eb, #38bdf8) !important;
-    color: #f0f9ff !important;
-    border: 1px solid #38bdf8 !important;
-    font-weight: 600 !important;
-    animation: btnGlow 2.4s ease-in-out infinite;
-}
-@keyframes btnGlow {
-    0%, 100% { box-shadow: 0 0 8px rgba(56,189,248,0.4); }
-    50%      { box-shadow: 0 0 22px rgba(56,189,248,0.85); }
-}
-div.stButton > button[kind="secondary"] {
-    background-color: #0b1220 !important;
-    color: #cbe4ff !important;
-    border: 1px solid #1e3a5f !important;
-}
-div.stButton > button[kind="secondary"]:hover {
-    border-color: #38bdf8 !important;
-    color: #38bdf8 !important;
-    box-shadow: 0 0 10px rgba(56,189,248,0.4);
-}
-
-/* --- Tabs: glowing active indicator --- */
-button[data-baseweb="tab"] { color: #6b8cb3 !important; }
-button[data-baseweb="tab"][aria-selected="true"] {
-    color: #38bdf8 !important;
-    text-shadow: 0 0 8px rgba(56,189,248,0.5);
-}
-div[data-baseweb="tab-highlight"] {
-    background-color: #38bdf8 !important;
-    box-shadow: 0 0 10px rgba(56,189,248,0.8);
-}
-
-/* --- AI Summary code block: scanning light sweep --- */
-div[data-testid="stCodeBlock"] {
-    background-color: #060a14 !important;
-    border: 1px solid #1e3a5f !important;
-    border-radius: 10px !important;
-    position: relative;
-    overflow: hidden;
-}
-div[data-testid="stCodeBlock"]::before {
-    content: "";
-    position: absolute;
-    top: 0; left: -30%;
-    width: 30%; height: 2px;
-    background: linear-gradient(90deg, transparent, #38bdf8, transparent);
-    animation: scanLine 3.2s linear infinite;
-}
-@keyframes scanLine {
-    0%   { left: -30%; }
-    100% { left: 100%; }
-}
-div[data-testid="stCodeBlock"] pre {
-    background-color: #060a14 !important;
-    white-space: pre-wrap !important;
-    word-break: break-word !important;
-}
-div[data-testid="stCodeBlock"] code {
-    color: #dff0ff !important;
-    background-color: transparent !important;
-    font-size: 1.05rem !important;
-    line-height: 1.7 !important;
-    white-space: pre-wrap !important;
-    word-break: break-word !important;
-}
-
-/* Expanders (Study Assistant panels) */
-div[data-testid="stExpander"] {
-    background-color: #0b1220 !important;
-    border: 1px solid #1e3a5f !important;
-    border-radius: 10px !important;
-}
-div[data-testid="stExpander"] summary {
-    color: #dff0ff !important;
-    font-weight: 600 !important;
-}
-div[data-testid="stExpander"] .stMarkdown p,
-div[data-testid="stExpander"] .stMarkdown li {
-    color: #cbe4ff !important;
-}
-
-/* Chat messages */
-div[data-testid="stChatMessage"] {
-    background-color: #0b1220 !important;
-    border: 1px solid #1e3a5f !important;
-    border-radius: 10px !important;
-}
-div[data-testid="stChatMessage"] p {
-    color: #cbe4ff !important;
-}
-
-/* Info/warning/error banners */
-div[data-testid="stAlert"] p {
-    color: #030712 !important;
-}
-
-hr { border-color: #1e3a5f !important; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
 </style>
 """, unsafe_allow_html=True)
 
@@ -342,9 +190,12 @@ def run_pipeline(input_kind: str, summary_mode: str, backend: str,
                 if ext not in ALLOWED_VIDEO_EXTENSIONS:
                     status.update(label=f"❌ Unsupported file type: .{ext}", state="error")
                     return None
+                if uploaded_file.size > MAX_CONTENT_LENGTH:
+                    status.update(label="File exceeds the 500 MB upload limit.", state="error")
+                    return None
                 status.write("📁 Saving uploaded file…")
                 job_id = uuid.uuid4().hex[:10]
-                safe_name = f"{job_id}_{uploaded_file.name}"
+                safe_name = f"{job_id}_{Path(uploaded_file.name).name}"
                 saved_path = UPLOAD_FOLDER / safe_name
                 with open(saved_path, "wb") as f:
                     f.write(uploaded_file.getbuffer())
@@ -368,6 +219,18 @@ def run_pipeline(input_kind: str, summary_mode: str, backend: str,
 
                 status.update(label="📝 Transcribing audio (can take a minute)…")
                 transcript = transcriber.transcribe_audio(audio_path)
+
+            # Caption-only runs do not pass through the audio duration checks.
+            if not video_meta.get("file_path"):
+                duration = video_meta.get("duration_seconds") or 0
+                if duration > MAX_VIDEO_DURATION_SECONDS:
+                    limit_min = MAX_VIDEO_DURATION_SECONDS // 60
+                    actual_min = int(duration // 60)
+                    status.update(
+                        label=f"Video is {actual_min} min, over the {limit_min} min limit.",
+                        state="error",
+                    )
+                    return None
 
             status.update(label="🔍 Analyzing content for highlights & chapters…")
             highlights = summarizer.generate_key_highlights(transcript["segments"], backend=backend)
@@ -407,11 +270,14 @@ def format_duration(seconds):
 # Sidebar
 # =============================================================================
 with st.sidebar:
-    st.markdown("## 🤖 J.A.R.V.I.S.")
-    st.caption("AI Video Summarizer")
+    st.markdown(
+        '<div class="sidebar-brand"><span class="brand-mark">J</span>'
+        '<div><strong>J.A.R.V.I.S.</strong><small>Video intelligence</small></div></div>',
+        unsafe_allow_html=True,
+    )
     st.divider()
 
-    st.markdown("### ⚙️ Settings")
+    st.markdown("### Settings")
     backend_options = ["Gemini (Cloud)"] if DEPLOYED_MODE else ["Gemini (Cloud)", "Ollama (Local)"]
     default_index = 0 if st.session_state.ai_backend == "gemini" else (1 if len(backend_options) > 1 else 0)
     backend_label = st.selectbox("AI Backend", backend_options, index=default_index)
@@ -425,11 +291,11 @@ with st.sidebar:
     selected_summary_mode = summary_label_to_key[summary_mode_label]
 
     st.divider()
-    st.markdown("### 🕘 History")
+    st.markdown("### Recent videos")
     if st.session_state.videos:
         for jid, v in reversed(list(st.session_state.videos.items())):
             label = v["title"][:26] + ("…" if len(v["title"]) > 26 else "")
-            if st.button(f"📼 {label}", key=f"hist_{jid}", use_container_width=True):
+            if st.button(label, key=f"hist_{jid}", use_container_width=True):
                 st.session_state.current_job_id = jid
                 st.session_state.video_start_time = 0
                 st.rerun()
@@ -437,44 +303,43 @@ with st.sidebar:
         st.caption("No videos processed yet this session.")
 
     st.divider()
-    st.markdown("### 🧰 Tech Stack")
-    st.caption("Faster-Whisper · Gemini / Ollama · Streamlit · FFmpeg · ReportLab")
+    st.caption("Your video history is saved for this session.")
 
 
 # =============================================================================
 # Header
 # =============================================================================
-st.markdown('<p class="jarvis-title">J.A.R.V.I.S<span>.</span></p>', unsafe_allow_html=True)
-st.markdown('<p class="jarvis-sub">AI VIDEO SUMMARIZER DASHBOARD</p>', unsafe_allow_html=True)
-
-model_display = "Gemini (3.7 Flash)" if st.session_state.ai_backend == "gemini" else "Ollama (Llama-3.1)"
+model_display = "Gemini Cloud" if st.session_state.ai_backend == "gemini" else "Ollama Local"
 st.markdown(
-    f'<span class="status-badge"><span class="dot-online">●</span> STATUS: <b>ONLINE</b></span>'
-    f'<span class="status-badge">MODEL: <b>{model_display}</b></span>',
+    '<div class="jarvis-hero"><div><div class="hero-kicker">Video intelligence</div>'
+    '<div class="jarvis-title">J.A.R.V.I.S.</div>'
+    '<p class="jarvis-sub">Turn long videos into clear summaries and useful study material.</p></div>'
+    f'<div class="hero-tag">Active model&nbsp;&nbsp;·&nbsp;&nbsp;{model_display}</div></div>',
     unsafe_allow_html=True,
 )
 
-st.write("")
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("🎬 Videos Processed", st.session_state.stats_videos)
-c2.metric("⏱️ Time Saved (hrs)", f"{st.session_state.stats_hours:.1f}")
-c3.metric("🗂️ Sources Supported", 4)
-c4.metric("✅ Success Rate", "99.8%")
+c1, c2, c3 = st.columns(3)
+c1.metric("Videos processed this session", st.session_state.stats_videos)
+c2.metric("Video hours analyzed", f"{st.session_state.stats_hours:.1f}")
+c3.metric("Summary length", SUMMARY_MODES[selected_summary_mode]["label"].split(" (")[0])
 
 st.divider()
 
 # =============================================================================
 # Process New Video
 # =============================================================================
-st.markdown("### 🎥 Process New Video")
+st.markdown("### Create a video brief")
+st.caption("Paste a YouTube link or upload a video to get started.")
 
 tab_url, tab_upload = st.tabs(["🔗 YouTube URL", "📁 Upload File"])
 
 with tab_url:
-    youtube_url = st.text_input("Paste YouTube URL here…", key="yt_url_input", label_visibility="collapsed",
-                                 placeholder="Paste YouTube URL here…")
+    youtube_url = st.text_input(
+        "YouTube video URL", key="yt_url_input",
+        placeholder="https://www.youtube.com/watch?v=…",
+    )
 
-    st.caption("Try an example:")
+    st.caption("Or load a sample link")
     ex_cols = st.columns(3)
     examples = {
         "AI Agents Explained": "https://www.youtube.com/watch?v=eXdVDhOGqoE",
@@ -494,7 +359,7 @@ with tab_url:
             args=(url,)
         )
 
-    if st.button("🚀 ANALYZE", type="primary", key="analyze_url_btn"):
+    if st.button("Analyze video", type="primary", key="analyze_url_btn"):
         if not youtube_url or not youtube_url.strip():
             st.warning("Paste a YouTube URL first.")
         else:
@@ -510,12 +375,11 @@ with tab_url:
 
 with tab_upload:
     uploaded_file = st.file_uploader(
-        "Drop a video file here", type=["mp4", "mov", "webm", "mkv", "avi"],
-        label_visibility="collapsed",
+        "Choose a video file", type=["mp4", "mov", "webm", "mkv", "avi"],
     )
-    st.caption("MP4, MOV, WebM, MKV — up to 500MB")
+    st.caption("MP4, MOV, WebM, MKV, AVI — up to 500 MB")
 
-    if st.button("🚀 ANALYZE", type="primary", key="analyze_upload_btn"):
+    if st.button("Analyze video", type="primary", key="analyze_upload_btn"):
         if not uploaded_file:
             st.warning("Choose a video file first.")
         else:
@@ -538,12 +402,13 @@ current_id = st.session_state.current_job_id
 result = st.session_state.videos.get(current_id) if current_id else None
 
 if not result:
-    st.info("👆 Process a video above to see the AI summary, highlights, chapters, chat, and study tools here.")
+    st.markdown("### Your video workspace")
+    st.info("Your summary, key moments, chapters, and study tools will appear here after you analyze a video.")
 else:
     col_preview, col_summary = st.columns([1, 1])
 
     with col_preview:
-        st.markdown("#### 🎬 Video Preview")
+        st.markdown("#### Video preview")
         if result.get("source") == "upload":
             st.video(result["file_path"], start_time=st.session_state.video_start_time)
         elif result.get("source_url"):
@@ -552,8 +417,9 @@ else:
         st.caption(f"{result.get('channel', 'Unknown')} · {format_duration(result.get('duration_seconds'))} · {result.get('source', 'Unknown')}")
 
     with col_summary:
-        st.markdown("#### 🧠 AI Summary")
-        st.code(result["summary"], language=None, wrap_lines=True)
+        st.markdown("#### AI summary")
+        with st.container(border=True):
+            st.markdown(result["summary"])
 
         exp_col1, exp_col2 = st.columns(2)
         with exp_col1:
@@ -571,7 +437,7 @@ else:
     col_hi, col_ch = st.columns(2)
 
     with col_hi:
-        st.markdown("#### ⭐ Key Highlights")
+        st.markdown("#### Key moments")
         highlights = result.get("highlights", [])
         if not highlights:
             st.caption("No highlights generated.")
@@ -584,7 +450,7 @@ else:
                 st.rerun()
 
     with col_ch:
-        st.markdown("#### 📑 Smart Chapters")
+        st.markdown("#### Smart chapters")
         chapters = result.get("chapters", [])
         if not chapters:
             st.caption("No chapters generated.")
@@ -601,7 +467,7 @@ else:
 
     # ---------------- Chat with video ----------------
     with col_chat:
-        st.markdown("#### 💬 Chat with Video")
+        st.markdown("#### Ask the video")
         history = st.session_state.chat_history.setdefault(current_id, [])
 
         chat_box = st.container(height=280)
@@ -627,7 +493,7 @@ else:
             with st.spinner("Thinking…"):
                 try:
                     answer = chat_service.answer_question(
-                        result["transcript"], result["title"], question, history,
+                        result["transcript"], result["title"], question, history[:-1],
                         backend=st.session_state.ai_backend,
                     )
                 except Exception as e:
@@ -637,7 +503,7 @@ else:
 
     # ---------------- Study assistant ----------------
     with col_study:
-        st.markdown("#### 📚 Study Assistant")
+        st.markdown("#### Study tools")
         study_state = st.session_state.study_output.setdefault(current_id, {})
 
         sb1, sb2 = st.columns(2)
@@ -674,23 +540,34 @@ else:
 
         if study_state.get("viva-questions"):
             with st.expander("❓ Viva Questions", expanded=True):
-                for i, q in enumerate(study_state["viva-questions"]):
-                    st.markdown(f"**Q{i+1}. {q.get('question','')}**")
-                    st.caption(q.get("answer", ""))
+                if isinstance(study_state["viva-questions"], list):
+                    for i, q in enumerate(study_state["viva-questions"]):
+                        st.markdown(f"**Q{i+1}. {q.get('question','')}**")
+                        st.caption(q.get("answer", ""))
+                else:
+                    st.error(study_state["viva-questions"])
 
         if study_state.get("mcq"):
             with st.expander("📋 MCQ Generator", expanded=True):
-                for i, m in enumerate(study_state["mcq"]):
-                    st.markdown(f"**Q{i+1}. {m.get('question','')}**")
-                    for j, opt in enumerate(m.get("options", [])):
-                        marker = "✅" if j == m.get("correct_index", -1) else "◻️"
-                        st.write(f"{marker} {chr(65+j)}. {opt}")
-                    if m.get("explanation"):
-                        st.caption(m["explanation"])
+                if isinstance(study_state["mcq"], list):
+                    for i, m in enumerate(study_state["mcq"]):
+                        st.markdown(f"**Q{i+1}. {m.get('question','')}**")
+                        options = m.get("options", [])
+                        if isinstance(options, list):
+                            for j, opt in enumerate(options):
+                                marker = "✅" if j == m.get("correct_index", -1) else "◻️"
+                                st.write(f"{marker} {chr(65+j)}. {opt}")
+                        if m.get("explanation"):
+                            st.caption(m["explanation"])
+                else:
+                    st.error(study_state["mcq"])
 
         if study_state.get("flashcards"):
             with st.expander("🗂 Flashcards", expanded=True):
-                for i, f in enumerate(study_state["flashcards"]):
-                    st.markdown(f"**{f.get('front','')}**")
-                    st.caption(f.get("back", ""))
-                    st.write("")
+                if isinstance(study_state["flashcards"], list):
+                    for i, f in enumerate(study_state["flashcards"]):
+                        st.markdown(f"**{f.get('front','')}**")
+                        st.caption(f.get("back", ""))
+                        st.write("")
+                else:
+                    st.error(study_state["flashcards"])

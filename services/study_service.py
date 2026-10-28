@@ -5,6 +5,15 @@ generator, and flashcards — all derived from the video transcript.
 from services.llm_client import chat_completion, safe_json_parse
 
 
+def _json_list(raw: str, key: str) -> list:
+    parsed = safe_json_parse(raw, {})
+    if isinstance(parsed, list):
+        return [item for item in parsed if isinstance(item, dict)]
+    if isinstance(parsed, dict) and isinstance(parsed.get(key), list):
+        return [item for item in parsed[key] if isinstance(item, dict)]
+    return []
+
+
 def generate_exam_notes(transcript_text: str, video_title: str, backend: str = None) -> str:
     system = (
         "You write concise, well-structured exam revision notes from a "
@@ -33,7 +42,7 @@ def generate_viva_questions(transcript_text: str, video_title: str, count: int =
         '{"questions": [{"question": "...", "answer": "short model answer"}]}'
     )
     raw = chat_completion(system, user, json_mode=True, backend=backend)
-    return safe_json_parse(raw, {"questions": []}).get("questions", [])
+    return _json_list(raw, "questions")
 
 
 def generate_mcqs(transcript_text: str, video_title: str, count: int = 6, backend: str = None) -> list:
@@ -49,7 +58,7 @@ def generate_mcqs(transcript_text: str, video_title: str, count: int = 6, backen
         '"options": ["A", "B", "C", "D"], "correct_index": 0, "explanation": "..."}}]}}'
     )
     raw = chat_completion(system, user, json_mode=True, backend=backend)
-    return safe_json_parse(raw, {"mcqs": []}).get("mcqs", [])
+    return _json_list(raw, "mcqs")
 
 
 def generate_flashcards(transcript_text: str, video_title: str, count: int = 10, backend: str = None) -> list:
@@ -64,4 +73,4 @@ def generate_flashcards(transcript_text: str, video_title: str, count: int = 10,
         f'Write {count} flashcards. Return JSON: {{"flashcards": [{{"front": "...", "back": "..."}}]}}'
     )
     raw = chat_completion(system, user, json_mode=True, backend=backend)
-    return safe_json_parse(raw, {"flashcards": []}).get("flashcards", [])
+    return _json_list(raw, "flashcards")
